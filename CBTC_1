@@ -1,0 +1,855 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Feb  1 16:01:20 2023
+
+@author: NACHITES
+"""
+
+#python 3 (3 lignes):
+    
+from tkinter import *
+from tkinter import ttk
+import tkinter.filedialog as fdi
+
+#python 2 (enlevez les # des 4 lignes et remettez les en haut) :
+
+#from compareCSVFile import CompareDirectories
+#from Tkinter import *
+#import ttk
+#import tkFileDialog as fdi
+
+#from PIL import Image, ImageTk
+import csv
+import numpy as np
+import matplotlib.pyplot as plt
+#import matplotlib.figure
+#import matplotlib.backends.backend_tkagg
+#from mpl_toolkits.axisartist.axislines import Subplot
+
+import os
+import copy
+import math
+import datetime as dt
+from zipfile import ZipFile, ZIP_DEFLATED
+#import xlwt (Excel)
+
+#############################################################################
+
+
+
+#CSV_format.py
+
+#nb des lignes du CSV (première ligne incluse)
+def nb_lignes(CSV):
+    f=open(CSV)              
+    myReader = csv.reader(f,delimiter=';')
+    c=0
+    for row in myReader :
+        c+=1
+    return c
+
+#nb de colonnes du CSV
+def nb_colonnes(CSV):
+    L=[]
+    f=open(CSV)              
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader:
+        L.append(row)
+        break
+    m=len(L[0])-1
+    return m
+
+#les noms des colonnes du CSV dans une liste
+def entete(CSV):
+    L=[]
+    f=open(CSV)              
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader:
+        L.append(row)
+        break
+    #enlever la dérnière case vide
+    L[0].remove(L[0][-1])    
+    return L[0]
+
+def valeurs_en_0(CSV):
+    L=[]
+    L.append(entete(CSV))
+    T=[0]*nb_colonnes(CSV)
+    for i in range(1,nb_lignes(CSV)):
+        L.append(T)
+    return L        
+
+
+
+
+#############################################################################
+
+
+
+
+#compareCSVFileConfig.py
+
+def averageFuncGenerator(fieldList):
+    nbField = len(fieldList)
+    func = lambda dico: (sum([dico[k] for k in fieldList])/nbField)
+    func.func_name = "Average_%s" % ("_".join(fieldList))
+    return func
+
+def deltaFuncGenerator(field1, field2):
+    func = lambda dico: (dico[field1] - dico[field2])
+    func.func_name = "Delta_%s_%s" % (field1, field2)
+    return func
+
+speedValue = ["train_speed_min", "train_speed_max", "train_speed_mean"]
+speedValue2 = ["train_speed_min", "train_speed_max", "train_speed_mean", averageFuncGenerator(["train_speed_max","train_speed_min"]), deltaFuncGenerator("train_speed_max", "train_speed_min") ]
+displacementValue = ["train_displacement_min", "train_displacement_max"]
+speedNdsiplacementValue = ["train_speed_min", "train_speed_max", "train_speed_mean", averageFuncGenerator(["train_speed_max","train_speed_min"]), deltaFuncGenerator("train_speed_max", "train_speed_min"), "train_displacement_min", "train_displacement_max", deltaFuncGenerator("train_displacement_max", "train_displacement_min") ]
+ArrayConf = {"speedValue":          speedValue,
+             "speedValue2":         speedValue2,
+             "displacementValue":   displacementValue,
+             "speedNdsiplacementValue": speedNdsiplacementValue}
+defaultDirectory = "C:/ODOMETRIE/CC_ODOMETRY/tests/"
+
+#############################################################################
+
+#compareCSVFile.py
+
+HTML_TEMPLATE ="""
+<!DOCTYPE html>
+<html>
+<style>
+table, th, td {
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+th, td {
+  padding: 10px;
+}
+th {
+  text-align: left;
+  background-color: #36b;
+}
+tr:nth-child(even) {
+  background-color: #eee;
+}
+tr:nth-child(odd) {
+ background-color: #fff;
+}
+</style>
+<head>
+<title>Compare %s %s</title>
+</head>
+<body>
+%s
+</body>
+</html> """
+
+
+HTML_TABLE_TEMPLATE="""<caption> Difference between {Folder1} and {Folder2} : {file} </caption>
+<table style="width:80%">
+  <tr>
+    <th>Fields</th>
+     <th>Minimum Value</th> 
+    <th>Maximum Value</th>
+    <th>Average</th>
+    <th>Standard deviation</th>
+   </tr>
+{lignes}
+</table>"""
+
+HTML_TABLE_SYNTHESE_TEMPLATE="""<caption> Difference between {Folder1} and {Folder2} : {file} </caption>
+<table style="width:80%">
+  <tr>
+    <th>File Name</th>
+    <th>Fields</th>
+     <th>Minimum Value</th> 
+    <th>Maximum Value</th>
+    <th>Average</th>
+    <th>Standard deviation</th>
+   </tr>
+{lignes}
+</table>"""
+
+HTML_ROW_TABLE="""
+  <tr>
+    <td>{Name}</td>
+     <td>{MinValue}</td> 
+    <td>{MaxValue}</td>
+    <td>{Average}</td>
+    <td>{stdDev}</td>
+   </tr>
+"""
+
+HTML_ROW_SYNTHESIS_TABLE="""
+  <tr>
+    <td>{File}</td>
+    <td>{Name}</td>
+     <td>{MinValue}</td> 
+    <td>{MaxValue}</td>
+    <td>{Average}</td>
+    <td>{stdDev}</td>
+   </tr>
+"""
+
+def Csv_to_Python(CSV):
+    L=[]
+    #transformer le CSV en liste :
+    f=open(CSV)             
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader :
+        L.append(row)
+             
+    
+    #enlever des cases vides :  
+    for i in range(len(L)):                 
+        L[i].remove('')
+
+    #enlever les brackets sur les floats :
+    for i in range(1,len(L)):  
+            L[i] = [float(x) for x in L[i]]
+    return L
+
+def Excel_delta(CSV1,CSV2,selectedHeader):
+    L1=Csv_to_Python(CSV1)
+    L2=Csv_to_Python(CSV2)
+    L3=L2
+    for i in range(1,len(L2)):
+        for j in range(len(L2[0])):
+            L3[i][j]=L1[i][j]-L2[i][j]
+    #workbook = ex.Workbook()
+    #sheet = workbook.add_sheet('feuille1')
+    #sheet.write(i, j, L3[i][j])
+    #workbook.save(CSV1+CSV2)
+
+def setToFloat(value):
+    if value.strip().strip("\n") == "":
+        return 0.0
+    else:
+        return float(value)
+
+class csvFile():
+    def __init__(self, fileName, titles={}, dico={}, zipped=False):
+        self.fileName = fileName
+        self.Name = os.path.split(self.fileName)[1]
+        self.titles = titles
+        self.nbCycles = 0
+        self.dicoCSV = copy.deepcopy(dico)
+        if self.dicoCSV == {}:
+            self.AnalyseCSVFile()
+        else:
+            self.nbCycles = len(self.dicoCSV)
+            #self.writeFile(zipped=zipped)
+        self.dataAnalyzed = {}
+        self.data = {}
+    
+    def analyzeData(self, listField):
+        for field in listField:
+            print ("callable", field, callable(field))
+            if (field not in self.titles) and (not callable(field)):
+                raise Exception("{0} is not a field included in {1}".format(field, self.Name))
+            self.dataAnalyzed[field] = {}
+            self.data[field] = []
+        for n in range(self.nbCycles):
+            for field in listField:
+                if callable(field):
+                    self.data[field].append(float(field(self.dicoCSV[n])))
+                else:
+                    self.data[field].append(float(self.dicoCSV[n][field]))
+       
+        for field in listField:
+            self.dataAnalyzed[field]["ValueMin"] = min(self.data[field])
+            self.dataAnalyzed[field]["ValueMax"] = max(self.data[field])
+            self.dataAnalyzed[field]["Average"] = math.fsum(self.data[field])/self.nbCycles
+            squareSum = 0
+            for value in self.data[field]:
+                squareSum += (value - self.dataAnalyzed[field]["Average"])**2
+            self.dataAnalyzed[field]["StandardDeviation"] = math.sqrt(squareSum/self.nbCycles)
+            
+            
+
+    def writeFile(self, zipped=False):
+        with open(self.fileName, "w") as fd:
+            fd.write(";".join(self.titles)+"\n")
+            for k in range(self.nbCycles):
+                line = []
+                for title in self.titles:
+                    line.append(str(self.dicoCSV[k][title]))
+                fd.write(";".join(line)+"\n")
+        if zipped:
+            with ZipFile(self.fileName +".zip", "w", compression=ZIP_DEFLATED) as zipFd:
+                zipFd.write(self.fileName, self.Name)
+            os.remove(self.fileName)
+            
+
+    def fillDico(self, line, cycle):
+        self.dicoCSV[cycle] = {}
+        lineSplitted = line.rsplit(";")
+        for k in range(len(self.titles)):
+            self.dicoCSV[cycle][self.titles[k]] = lineSplitted[k]
+
+    def AnalyseCSVFile(self):
+        with open(self.fileName, 'r') as fs:
+            firstLine = True
+            cycle = 0
+            for line in fs.readlines():
+                if firstLine:
+                    raw_titles = line.strip().strip("\n")
+                    self.titles = raw_titles.rsplit(";")
+                    firstLine = False
+                else:
+                    self.fillDico(line, cycle)
+                    cycle += 1
+        self.nbCycles = cycle
+
+        
+    def __sub__(self, otherCSVFile):
+        if not (isinstance(otherCSVFile, csvFile)):
+            raise Exception("{0} can't be substract to a csvFile".format(type(otherCSVFile)))
+        if (self.titles != otherCSVFile.titles):
+            raise Exception("{0} and {1} can't be substract as they don't have the same titles".format(self.fileName, otherCSVFile.fileName))
+        if (self.nbCycles != otherCSVFile.nbCycles):
+            raise Exception("{0} and {1} can't be substract as they don't have the same number of lines (cycles)".format(self.fileName, otherCSVFile.fileName))
+        if (self.fileName == otherCSVFile.fileName):
+            raise Exception("Don't compare a file ({0}) with itself".format(self.fileName))
+        Name = ""
+        if (self.Name != otherCSVFile.Name):
+            Name = "{0}_{1}".format(self.Name,  otherCSVFile.Name)
+        else:
+            path1 = os.path.split(self.fileName)[0]
+            path2 = os.path.split(otherCSVFile.fileName)[0]
+            while(os.path.split(path1)[1] == os.path.split(path2)[1]):
+                path1 = os.path.split(path1)[0]
+                path2 = os.path.split(path2)[0]
+            Name = "{0}_{1}_{2}".format(os.path.split(path1)[1],os.path.split(path2)[1],self.Name)
+        print ("Name:", Name)
+
+        dicoBuffer = {}
+        for line in self.dicoCSV:
+            dicoBuffer[line] = {}
+            for k in self.dicoCSV[line]:
+                try:
+                    dicoBuffer[line][k] = setToFloat(self.dicoCSV[line][k]) - setToFloat(otherCSVFile.dicoCSV[line][k])
+                except Exception as e:
+                    print ("Error {0} with value {1} of file {2} or value {3} of file {4} at line {5}".format(e.message, self.dicoCSV[line][k], self.Name, otherCSVFile.dicoCSV[line][k], otherCSVFile.Name, line))
+        return self.__class__(os.path.join(os.getcwd(), "report", Name), self.titles, dicoBuffer, zipped=True)
+
+def criteriaOK(path, includePath, excludePath= [], Pattern= "Output.csv"):
+    res = False
+    if Pattern not in path:
+        return False
+    for includePattern in includePath:
+        if includePattern in path:
+            res = True
+    if includePath == []:
+        res=True
+    for excludePattern in excludePath:
+        if excludePattern in path:
+            return False
+    return res
+    
+def parseDirectory(folder, includePath, excludePath= [], Pattern= "Output.csv"):
+    Rep = os.listdir(folder)
+    fileOK = []
+    for file in Rep:
+        if os.path.isdir(os.path.join(folder, file)):
+            fileOK += parseDirectory(os.path.join(folder, file), includePath, excludePath, Pattern)
+        else:
+            if criteriaOK(os.path.join(folder, file), includePath, excludePath, Pattern):
+                fileOK.append(os.path.join(folder, file))
+    return fileOK
+            
+        
+        
+def CompareDirectories(Folder1, Folder2, includePath =[], excludePath= [], Pattern= "Output.csv", data2Analyze=["train_speed_min", "train_speed_max"],varSaveFile=0, varSaveImage=0):
+    t0 = dt.datetime.now()
+    for excludePattern in excludePath:
+        if (excludePattern in Folder1):
+            raise Exception("The exclude pattern {0} is in included in the chosen folder :".format(excludePattern, Folder1))
+        if (excludePattern in Folder2):
+            raise Exception("The exclude pattern {0} is in included in the chosen folder :".format(excludePattern, Folder2))
+    fileFolder1 = parseDirectory(Folder1, includePath, excludePath= [], Pattern= "Output.csv")
+    nbFiles = len(fileFolder1)
+    Tables = ""
+    lignesTableSynthese = ""
+    Synthese = ""
+    numFile = 0
+    for file in fileFolder1:
+        numFile +=1
+        print ("File {0} in progress ({1}/{2})".format(file, numFile, nbFiles) )
+        file_rel = os.path.relpath(file, Folder1) 
+        file2 = os.path.join(Folder2, file_rel)
+        lignesTable = ""
+        if os.path.isfile(file2):
+            if criteriaOK(file2, includePath, excludePath, Pattern):
+                f1 = csvFile(file)
+                f2 = csvFile(file2)
+                if varSaveImage==1:
+                    saveComparePlot(file, file2, data2Analyze, entete(file))
+                    
+                file_comp = f1 - f2
+                if varSaveFile == 1:
+                    file_comp.writeFile(zipped=True)
+                file_comp.analyzeData(data2Analyze)
+                for field in file_comp.dataAnalyzed:
+                    if callable(field):
+                        _field = field.func_name
+                    else:
+                        _field = field
+                    lignesTable += HTML_ROW_TABLE.format(Name= _field,
+                                                         MinValue=file_comp.dataAnalyzed[field]["ValueMin"],
+                                                         MaxValue=file_comp.dataAnalyzed[field]["ValueMax"],
+                                                         Average=file_comp.dataAnalyzed[field]["Average"],
+                                                         stdDev=file_comp.dataAnalyzed[field]["StandardDeviation"])
+                    lignesTableSynthese += HTML_ROW_SYNTHESIS_TABLE.format(File=f1.Name,
+                                                                           Name= _field, 
+                                                                           MinValue=file_comp.dataAnalyzed[field]["ValueMin"],
+                                                                           MaxValue=file_comp.dataAnalyzed[field]["ValueMax"],
+                                                                           Average=file_comp.dataAnalyzed[field]["Average"],
+                                                                           stdDev=file_comp.dataAnalyzed[field]["StandardDeviation"])
+                Tables +=HTML_TABLE_TEMPLATE.format(lignes=lignesTable, Folder1=Folder1, Folder2=Folder2, file=file)
+                del f1
+                del f2
+                del file_comp
+            else:
+                print ("Warning : {0} format is not a valid file, either not included or excluded, or not conform to pattern.".format(file2))
+        else:
+            print ("Warning : {0} doesn't exist".format(file2))
+    res = HTML_TEMPLATE %(Folder1, Folder2, Tables)
+    Synthese = HTML_TABLE_SYNTHESE_TEMPLATE.format(lignes=lignesTableSynthese, Folder1=Folder1, Folder2=Folder2, file="Synthesis")
+    strdate = str(dt.datetime.now().date()).replace("-","_")
+    strtime = str(dt.datetime.now().time()).split(".")[0].replace(":","_")
+    syntheseRes = HTML_TEMPLATE % (Folder1, Folder2, Synthese)
+    with open ("ResultComp%s_%s_%s_%s.html" % (os.path.split(Folder1)[1], os.path.split(Folder2)[1], strdate, strtime), "w") as fres:
+        fres.write(res)
+    with open ("SyntheseComp%s_%s_%s_%s.html" % (os.path.split(Folder1)[1], os.path.split(Folder2)[1], strdate, strtime), "w") as fres:
+        fres.write(syntheseRes)
+    t1 = dt.datetime.now()
+    print ("Analysis terminated : {0} seconds elapsed".format((t1-t0).total_seconds()))
+    return res
+
+def GetListFile(Folder1, Folder2, includePath =[], excludePath= [], Pattern= "Output.csv"):
+    ListFile1=[]
+    ListFile2=[]
+    for excludePattern in excludePath:
+        if (excludePattern in Folder1):
+            raise Exception("The exclude pattern {0} is in included in the chosen folder :".format(excludePattern, Folder1))
+        if (excludePattern in Folder2):
+            raise Exception("The exclude pattern {0} is in included in the chosen folder :".format(excludePattern, Folder2))
+    fileFolder1 = parseDirectory(Folder1, includePath, excludePath= [], Pattern= "Output.csv")
+    nbFiles = len(fileFolder1)
+    Tables = ""
+    lignesTableSynthese = ""
+    Synthese = ""
+    numFile = 0
+    for file in fileFolder1:
+        numFile +=1
+        print ("File {0} in progress ({1}/{2})".format(file, numFile, nbFiles) )
+        file_rel = os.path.relpath(file, Folder1) 
+        file2 = os.path.join(Folder2, file_rel)
+        lignesTable = ""
+        if os.path.isfile(file2):
+            if criteriaOK(file2, includePath, excludePath, Pattern):
+                ListFile1.append(file)
+                ListFile2.append(file2)
+                
+    return ListFile1,ListFile2   
+
+
+     
+#############################################################################
+
+
+
+#displayPlot.py
+    
+def getHeader(CSV):
+    #transformer le CSV en liste
+    L=[]
+    try:
+        f= open(CSV)
+        myReader = csv.reader(f,delimiter=';')
+    except Exception:
+        f.close()
+
+    for row in myReader :
+        L.append(row)
+        break
+    return L
+
+def saveComparePlot(CSV1,CSV2,selectedHeader, L):
+    
+    A1 = matrice_trace(CSV1)
+    A2 = matrice_trace(CSV2)
+    A3 = np.subtract(A1, A2)
+    
+    #define 3 lines of plots and 1 column
+    fig, axes = plt.subplots(3,1)
+    L=getHeader(CSV1)
+    print("*"*50)
+    print("DEBUG: selectedHeader :", selectedHeader)
+    print("*"*50)
+    for j in range(len(A1)):
+        if L[0][j] in selectedHeader:
+           #plot of CSV1 
+           axes[0].plot([i for i in range (len(A1[j])) ], A1[j], label = L[0][j])
+           #plot of CSV2
+           axes[1].plot([i for i in range (len(A2[j])) ], A2[j])
+           #plot of delta
+           axes[2].plot([i for i in range (len(A3[j])) ], A3[j])
+
+    #Add a common legend for all subplots
+    fig.legend(loc="lower left")
+    #Define margin
+    plt.subplots_adjust(bottom=0.2, top=0.95)
+    
+    #Save the screenshot
+    fig.savefig('%s.png' % os.path.split(CSV1)[1])
+ 
+   
+ 
+#############################################################################
+
+
+#ihmCompareCSVFile.py      
+
+def Compare(*args):
+    try:
+        IncludePathTuple = Lb_includePath.get(0, Lb_includePath.size())
+        IncludePathArray = [k for k in IncludePathTuple]
+        config = Lb_confDetail.get(0, Lb_confDetail.size())
+        print ("config", config)
+        # configList = []
+        # for k in config:
+            # configList.append(k)
+        sel = Lb_conf.curselection()
+        configList = []
+        for k in sel:
+            configList += ArrayConf[Lb_conf.get(k)]
+        print ("Compare {0} with {1}".format(Folder1.get(), Folder2.get()))
+        print ("IncludePATH =", IncludePathArray)
+        print ("Variables compared :", configList)
+        CompareDirectories(Folder1.get(), Folder2.get(), includePath=IncludePathArray, data2Analyze=configList,varSaveFile=varSaveFile.get(), varSaveImage=varSaveImage.get())
+    except ValueError:
+        pass
+        
+def AddIncludePath(*args):
+    idx = Lb_includePath.size()
+    path = Add_includePath.get().strip()
+    if path != "":
+        Lb_includePath.insert(idx, path)
+
+def RemoveIncludePath(*args):
+    selItems = Lb_includePath.curselection()
+    selItemsArray = [k for k in selItems]
+    selItemsArray.sort(reverse=True)
+    for item in selItemsArray:
+        Lb_includePath.delete(item)
+    
+
+def folder1Choose(*args):
+    f1_buffer = Folder1.get()
+    if f1_buffer == "":
+       f1_buffer = defaultDirectory
+    f1_buffer = fdi.askdirectory(initialdir=f1_buffer, mustexist =True,title="Choose the first directory")
+    if f1_buffer != "":
+        Folder1.set(f1_buffer)
+
+def folder2Choose(*args):
+    f2_buffer = Folder2.get()
+    if f2_buffer == "":
+       f2_buffer = defaultDirectory
+    f2_buffer = fdi.askdirectory(initialdir=f2_buffer, mustexist =True,title="Choose the second directory")
+    if f2_buffer != "":
+        Folder2.set(f2_buffer)
+        
+def selectConfig(*args):
+    Lb_confDetail.delete(0, Lb_confDetail.size())
+    sel = Lb_conf.curselection()
+    ConfSelected = Lb_conf.curselection()
+    listVariable = []
+    for k in sel:
+        listVariable += ArrayConf[Lb_conf.get(k)]
+    idx = 0
+    for var in listVariable:
+        Lb_confDetail.insert(idx, var)
+
+def save_fig(CSV1,nom_im):
+    L=[]
+    f=open(CSV1)             
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader :
+        L.append(row)
+        break
+        
+    A1=matrice_trace(CSV1)
+    for j in range(len(A1)):
+        if L[0][j] in selectedHeader:
+            
+           plt.plot([i for i in range (len(A1[j])) ], A1[j], label = L[0][j])
+           #plt.plot([i for i in range (len(A1[j])) ], A1[j], label = L[0][j]+str(1))
+           
+    plt.legend()
+    
+    plt.savefig(str(nom_im)) #CSV1+L[0][j]+'.png'
+    #im = Image.open(str(nom_im))
+    #im.show()
+    
+def save_fig_delta(CSV1,CSV2,nom_im):
+    L=[]
+    f=open(CSV1)             
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader :
+        L.append(row)
+        break
+    
+    A3=matrice_trace(CSV1)-matrice_trace(CSV2)
+    for j in range(len(A3)):
+        if L[0][j] in selectedHeader:
+            
+           plt.plot([i for i in range (len(A3[j])) ], A3[j], label = L[0][j])
+           #plt.plot([i for i in range (len(A3[j])) ], A3[j], label = L[0][j]+str(1))
+            
+    plt.legend()
+    
+    plt.savefig(str(nom_im)) #CSV1+L[0][j]+'.png'
+
+
+#se contenter des valeurs numériques du tableau en transposant la liste :
+def matrice_trace(CSV):
+    L=[] 
+    T=[]
+    m=0
+    
+    #transformer le CSV en liste :
+    f=open(CSV)             
+    myReader = csv.reader(f,delimiter=';')
+    for row in myReader :
+        L.append(row)
+    
+    #nb de lignes :
+    m=len(L)            
+   
+    #enlever des cases vides :  
+    for i in range(m):                 
+        L[i].remove('')
+
+    #enlever les brackets sur les floats :
+    for i in range(1,m):            
+            L[i] = [float(x) for x in L[i]]
+
+    #élimination de la 1ere ligne (texte) :
+    T=[L[i] for i in range(1,m)]    
+    
+    #rendre notre tableau excel un array sur matplotlib :
+    A=np.array(T)  
+    
+    #transposer notre tableau :
+    tA=np.transpose(A)
+    return tA
+    
+def imageINsection(im,fen):
+    ##----- Création de la fenêtre -----##
+    fen = Tk() #########
+    fen.title('Graph')
+    ##----- Importation de l'image avec PIL et conversion -----##
+    
+    courbes = ImageTk.PhotoImage(im, master=fen)
+
+    ##----- Création du canevas et affichage de l'image -----##
+    dessin = Canvas(fen, width = im.size[0], height = im.size[1])
+    cb = dessin.create_image(0,0, anchor = NW, image = courbes)
+    dessin.grid()
+
+    ##----- Programme principal -----##
+    fen.mainloop()                    # Boucle d'attente des événements
+
+
+def open_window(*args):
+    
+    window = Tk()
+    window.title('Scenarios window')
+    #window.geometry("500x600")
+    Lb_Intersection = Listbox(window, width=80, height=30, selectmode=SINGLE)
+    #canvas = Canvas(window,width=350, height=200)
+    
+    IncludePathTuple = Lb_includePath.get(0, Lb_includePath.size())
+    IncludePathArray = [k for k in IncludePathTuple]
+    
+    ListFile1,ListFile2 = GetListFile(Folder1.get(), Folder2.get(), includePath=IncludePathArray)
+    
+    i=0
+    
+    
+    for File in ListFile1 :
+        Lb_Intersection.insert(i,os.path.split(File)[1])
+        i+=1
+        
+    configList = []
+    sel = Lb_conf.curselection()
+    for k in sel:
+        configList += ArrayConf[Lb_conf.get(k)]
+
+    sb_ListBox = Scrollbar(
+    window,
+    orient=VERTICAL,
+    command=Lb_Intersection.yview)
+    
+    Lb_Intersection['yscrollcommand'] = sb_ListBox.set
+
+
+    #print('*'*50)
+    #print(configList)   
+    #graphFigure = matplotlib.figure.Figure()    # Initialize the plot object
+    # graphFigure = plt.figure(figsize =(4, 4))
+    # graphFigureCanvas = matplotlib.backends.backend_tkagg.FigureCanvasTkAgg(graphFigure, master=window)
+    # graphCanvas = graphFigureCanvas.get_tk_widget()
+    
+    def Show_courbes():
+        
+        IndexTuple = Lb_Intersection.curselection()
+        if len(IndexTuple)==0:
+            return
+        Index,=IndexTuple
+        FileSelected = Lb_Intersection.get(Index)
+        #print(FileSelected)
+        
+        
+        ListFile1,ListFile2 = GetListFile(Folder1.get(), Folder2.get(), includePath=IncludePathArray)
+        
+        for File in ListFile1 :
+            if FileSelected in File:
+                CSV1=File
+                break
+        for File in ListFile2 :
+            if FileSelected in File:
+                CSV2=File
+                break
+        L=getHeader(CSV1)  
+        A1 = matrice_trace(CSV1)
+        A2 = matrice_trace(CSV2)
+        A3 = np.subtract(A1, A2)
+        
+        #define 3 lines of plots and 1 column with share x axis
+        graphFigure, axes = plt.subplots(3, 1, sharex=True)
+        
+        # Share the y axis for the 2 firsts subplots :
+        
+        #versions anciennes de matplotlib :
+        #axes[0]._shared_y_axes.join(axes[0],axes[1])
+        
+        #version 3.5.1 de matplotlib et plus :
+        axes[0]._shared_axes["y"].join(axes[0],axes[1])
+        
+        # axes =[]
+        # axes.append(Subplot(graphFigure, 111))
+        # axes.append(Subplot(graphFigure, 211))
+        # axes.append(Subplot(graphFigure, 311))
+        # graphFigure.add_subplot(axes[0])
+        # graphFigure.add_subplot(axes[1])
+        # graphFigure.add_subplot(axes[2])
+        
+        for j in range(len(A1)):
+            if L[0][j] in configList:
+               #plot of CSV1 
+               axes[0].plot([i for i in range (len(A1[j])) ], A1[j], label = L[0][j])
+               #axes[0].plot([i for i in range (len(A1[j])) ], A1[j], label = L[0][j]+str(1))
+               #plot of CSV2
+               axes[1].plot([i for i in range (len(A2[j])) ], A2[j])
+               #plot of delta
+               axes[2].plot([i for i in range (len(A3[j])) ], A3[j])
+
+        #Add a common legend for all subplots
+        graphFigure.legend(loc="lower left")
+        
+        
+        #Define margin
+        plt.subplots_adjust(bottom=0.2, top=0.95)
+        plt.show()
+        #graphCanvas.draw()
+        #Saving
+        # plt.savefig('C:\\Python_Saad\\saad.png')
+        # im = Image.open('C:\\Python_Saad\\saad.png')
+        
+        # imageINsection(im,window)
+        
+
+        
+    #Lb_Intersection.grid(column=21, row=20, sticky=(N,E), rowspan=10, columnspan=10)
+    ##graphCanvas.grid(column=31, row=20,rowspan=30, columnspan=30)
+    #ttk.Button(window, text="Courbes", command=Show_courbes).grid(column=26, row=17, sticky=W)
+    #ttk.Button(window, text="Return", command=window.destroy).grid(column=26, row=35, sticky=W)
+    ttk.Button(window, text="Courbes", command=Show_courbes).pack(ipadx=20, ipady=10, side=TOP)
+    Lb_Intersection.pack(side=LEFT, expand=True, fill=BOTH)
+    sb_ListBox.pack(side=LEFT,fill=Y)
+    #ttk.Button(window, text="Return", command=window.destroy).pack(ipadx=20, ipady=10, side=BOTTOM)
+    
+    
+    window.mainloop()    
+    
+
+root = Tk()
+root.title("Compare CSV Files")
+
+mainframe = ttk.Frame(root, padding="8 5 12 12")
+mainframe.grid(column=0, row=0, sticky=(N, W, E, S))
+root.columnconfigure(0, weight=1)
+root.rowconfigure(0, weight=1)
+
+Folder1 = StringVar()
+Folder1_entry = ttk.Entry(mainframe, width=80, textvariable=Folder1)
+Folder1_entry.grid(column=0, row=1, sticky=(W, E), columnspan=3)
+
+Folder2 = StringVar()
+Folder1_entry = ttk.Entry(mainframe, width=80, textvariable=Folder2)
+Folder1_entry.grid(column=0, row=2, sticky=(W, E), columnspan=3)
+
+Add_includePath = StringVar()
+Add_includePath_entry = ttk.Entry(mainframe, width=15, textvariable=Add_includePath)
+Add_includePath_entry.grid(column=0, row=3, sticky=(W, E))
+
+Lb_includePath = Listbox(mainframe, width=15, selectmode=MULTIPLE)
+Lb_includePath.insert(0, "SIMULATION")
+Lb_includePath.insert(1, "SITE")
+Lb_includePath.grid(column=2, row=3, sticky=(W, E), rowspan=3)
+
+Lb_conf = Listbox(mainframe, width=15, selectmode=SINGLE)
+idx = 0
+for k, v in ArrayConf.items():
+    Lb_conf.insert(idx, k)
+Lb_conf.grid(column=0, row=6, sticky=(W, E), rowspan=3)
+
+Lb_confDetail = Listbox(mainframe, width=15, selectmode=SINGLE)
+idx = 0
+
+Lb_confDetail.grid(column=2, row=6, sticky=(W, E), rowspan=3, columnspan=2)
+
+#Buttons :
+ttk.Button(mainframe, text="Add", command=AddIncludePath).grid(column=1, row=3, sticky=W)
+ttk.Button(mainframe, text="Remove", command=RemoveIncludePath).grid(column=1, row=4, sticky=W)
+
+ttk.Button(mainframe, text="Folder1", command=folder1Choose).grid(column=3, row=1, sticky=W)
+ttk.Button(mainframe, text="Folder2", command=folder2Choose).grid(column=3, row=2, sticky=W)
+
+ttk.Button(mainframe, text="Config", command=selectConfig).grid(column=1, row=6, sticky=W)
+
+ttk.Button(mainframe, text="Compare", command=Compare).grid(column=3, row=3, sticky=W)
+ttk.Button(mainframe, text="Open", command=open_window).grid(column=1, row=5, sticky=W)
+
+#Check boxes :
+varSaveFile = IntVar()
+varSaveImage = IntVar()
+ckbSaveFile = Checkbutton(mainframe,text= "Save Files", variable=varSaveFile, onvalue=1, offvalue=0 , height = 2, width = 10)
+ckbSaveFile.grid(column=3, row=4, sticky=(N,W))
+ckSaveImage = Checkbutton(mainframe,text= "Save Image", variable=varSaveImage, onvalue=1, offvalue=0 , height = 2, width = 10)
+ckSaveImage.grid(column=3, row=5, sticky=(N,W))
+
+#Check_save(CSV1,CSV2)      
+
+
+for child in mainframe.winfo_children(): 
+    child.grid_configure(padx=5, pady=5)
+
+Folder1_entry.focus()
+root.bind("<Return>", Compare)
+
+root.mainloop()
